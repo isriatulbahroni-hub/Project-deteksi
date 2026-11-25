@@ -1,0 +1,14 @@
+{
+  "name": "Penghitung Orang AI",
+  "short_name": "Deteksi",
+  "description": "Hitung orang secara real-time dari kamera HP, langsung di browser. Tanpa unggah video.",
+  "lang": "id",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

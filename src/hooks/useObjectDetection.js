@@ -8,9 +8,13 @@ import { preprocessImage } from '../utils/preprocessing';
 import { processOutput, scaleDetections } from '../utils/postprocessing';
 import { createTracker } from '../utils/tracker';
 import { createCounter, DEFAULT_LINE } from '../utils/counter';
+import { createHeatmap } from '../utils/heatmap';
+import { createDwell } from '../utils/dwell';
 import { MODEL_CONFIG, MODELS, COCO_CLASSES } from '../utils/constants';
 
 const inputShape = (cfg) => [1, 3, cfg.inputHeight, cfg.inputWidth];
+
+const EMPTY_STATS = { current: 0, in: 0, out: 0, peak: 0, unique: 0, dwellSec: 0 };
 
 async function loadLabels(path) {
   if (!path) return COCO_CLASSES;
@@ -38,7 +42,7 @@ export function useObjectDetection() {
   const [fps, setFps] = useState(0);
   const [detectionCount, setDetectionCount] = useState(0);
   const [threshold, setThresholdState] = useState(MODEL_CONFIG.confidenceThreshold);
-  const [stats, setStats] = useState({ current: 0, in: 0, out: 0, peak: 0, unique: 0 });
+  const [stats, setStats] = useState(EMPTY_STATS);
   const [line, setLineState] = useState(DEFAULT_LINE);
 
   // Incremented on every start/stop; a loop iteration exits if its id is stale.
@@ -47,6 +51,8 @@ export function useObjectDetection() {
   const modelRef = useRef(null); // current model, so the previous one can be released exactly once
   const thresholdRef = useRef(threshold); // read by the running loop without restarting it
   const counterRef = useRef(createCounter());
+  const heatmapRef = useRef(createHeatmap()); // peta panas posisi kaki, dibaca kanvas tiap frame
+  const dwellRef = useRef(createDwell()); // lama tiap orang terlihat
   const lineRef = useRef(DEFAULT_LINE); // garis masuk/keluar, dibaca loop tanpa restart
 
   const setLine = useCallback((patch) => {
@@ -56,7 +62,9 @@ export function useObjectDetection() {
 
   const resetStats = useCallback(() => {
     counterRef.current.reset();
-    setStats({ current: 0, in: 0, out: 0, peak: 0, unique: 0 });
+    heatmapRef.current.reset();
+    dwellRef.current.reset();
+    setStats(EMPTY_STATS);
   }, []);
 
   const setThreshold = useCallback((value) => {
@@ -70,6 +78,9 @@ export function useObjectDetection() {
     (now) => (trackerRef.current?.predict(now) ?? []).filter((t) => t.className === 'person'),
     []
   );
+
+  // Grid peta panas saat ini ({ cols, rows, data, max }); dipanggil kanvas tiap frame.
+  const getHeatmap = useCallback(() => heatmapRef.current.grid(), []);
 
   /**
    * Load a model tier. Without a tier: load Fast, and switch to Accurate if this device runs Fast
@@ -126,6 +137,7 @@ export function useObjectDetection() {
     const loopId = ++loopIdRef.current;
     const tracker = createTracker();
     counterRef.current.newSession();
+    dwellRef.current.newSession();
     trackerRef.current = tracker;
     let frames = 0;
     let lastTime = performance.now();
@@ -144,19 +156,18 @@ export function useObjectDetection() {
       const now = performance.now();
       const visible = tracker.update(dets, now, thresholdRef.current);
       const people = visible.filter((t) => t.className === 'person');
+      const dims = { width: videoElement.videoWidth, height: videoElement.videoHeight };
       const counter = counterRef.current;
       const before = counter.snapshot();
-      counter.update(
-        people,
-        { width: videoElement.videoWidth, height: videoElement.videoHeight },
-        lineRef.current
-      );
+      counter.update(people, dims, lineRef.current);
+      heatmapRef.current.add(people, dims);
+      dwellRef.current.update(people, now);
       const after = counter.snapshot();
       const crossed = after.in !== before.in || after.out !== before.out;
 
       frames++;
       if (crossed || now - lastTime >= 1000) {
-        setStats({ current: people.length, ...after });
+        setStats({ current: people.length, ...after, dwellSec: dwellRef.current.snapshot().avgSec });
       }
       if (now - lastTime >= 1000) {
         setFps(Math.round((frames * 1000) / (now - lastTime)));
@@ -191,6 +202,7 @@ export function useObjectDetection() {
     fps,
     detectionCount,
     getTracks,
+    getHeatmap,
     stats,
     line,
     setLine,

@@ -12,6 +12,8 @@ export default function CameraView({
   stream,
   isFilePlaying,
   getTracks,
+  getHeatmap,
+  showHeatmap,
   isDetecting,
   line
 }) {
@@ -34,6 +36,8 @@ export default function CameraView({
         <BoundingBoxCanvas 
           videoRef={videoRef} 
           getTracks={getTracks}
+          getHeatmap={getHeatmap}
+          showHeatmap={showHeatmap}
           isDetecting={isDetecting}
           line={line}
         />

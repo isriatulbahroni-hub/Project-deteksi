@@ -5,7 +5,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useCamera } from './hooks/useCamera';
 import { useObjectDetection } from './hooks/useObjectDetection';
+import { useAnalytics } from './hooks/useAnalytics';
+import { formatDuration } from './utils/analytics';
 import CameraView from './components/CameraView';
+import Dashboard from './components/Dashboard';
 import './App.css';
 
 const TIER_LABEL = { fast: 'Cepat', accurate: 'Akurat' };
@@ -27,11 +30,16 @@ function App() {
 
   const {
     model, isLoading: isModelLoading, error: modelError, isRunning: isDetecting,
-    fps, getTracks, stats, line, setLine, resetStats, threshold, setThreshold,
+    fps, getTracks, getHeatmap, stats, line, setLine, resetStats, threshold, setThreshold,
     tier, executionProvider, initializeModel, startDetection, stopDetection,
   } = useObjectDetection();
 
+  const analytics = useAnalytics(stats, isDetecting);
+  const { settings, updateSettings } = analytics;
+
   const [videoFileUrl, setVideoFileUrl] = useState(null);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [tgStatus, setTgStatus] = useState('');
   const fileInputRef = useRef(null);
 
   // Kamera dan model dimuat otomatis, jadi pengguna tinggal menekan "Mulai"
@@ -75,6 +83,14 @@ function App() {
 
   const handleSwitchCamera = () => withDetectionPaused(switchCamera);
 
+  const setLimit = (n) => updateSettings({ limit: Math.min(999, Math.max(0, Math.round(Number(n)) || 0)) });
+
+  const handleTestTelegram = async () => {
+    setTgStatus('Mengirim…');
+    const r = await analytics.testTelegram();
+    setTgStatus(r.ok ? '✅ Terkirim' : `⚠️ ${r.error}`);
+  };
+
   const error = cameraError || modelError;
 
   return (
@@ -91,16 +107,26 @@ function App() {
         stream={stream}
         isFilePlaying={!!videoFileUrl}
         getTracks={getTracks}
+        getHeatmap={getHeatmap}
+        showHeatmap={showHeatmap}
         isDetecting={isDetecting}
         line={line}
       />
+
+      {analytics.over && (
+        <div className="alert-banner" role="alert">
+          ⚠️ Melebihi batas: {analytics.value} / {settings.limit}
+        </div>
+      )}
 
       <section className="stats">
         <Stat big label="Orang terlihat" value={stats.current} />
         <Stat label="Masuk" value={stats.in} />
         <Stat label="Keluar" value={stats.out} />
+        <Stat label="Di dalam (masuk − keluar)" value={Math.max(0, stats.in - stats.out)} />
         <Stat label="Puncak" value={stats.peak} />
         <Stat label="Total unik" value={stats.unique} />
+        <Stat label="Lama terlihat (rata-rata)" value={formatDuration(stats.dwellSec)} />
       </section>
 
       <section className="actions">
@@ -114,6 +140,15 @@ function App() {
         <button className="btn" onClick={handleSwitchCamera} disabled={!!videoFileUrl}>🔄 Kamera</button>
         <button className="btn" onClick={resetStats}>↺ Reset</button>
       </section>
+
+      <section className="toggles">
+        <button className={`btn btn-small${showHeatmap ? ' btn-on' : ''}`} aria-pressed={showHeatmap}
+                onClick={() => setShowHeatmap((v) => !v)}>
+          🔥 Peta panas {showHeatmap ? 'hidup' : 'mati'}
+        </button>
+      </section>
+
+      <Dashboard history={analytics.history} onClear={analytics.clearHistory} />
 
       <details className="settings">
         <summary>⚙️ Pengaturan</summary>
@@ -155,6 +190,48 @@ function App() {
           {videoFileUrl && <button className="btn btn-small" onClick={handleUseCamera}>📷 Kembali ke kamera</button>}
           <input ref={fileInputRef} type="file" accept="video/*" hidden
                  onChange={(e) => { handleVideoFile(e.target.files?.[0]); e.target.value = ''; }} />
+        </div>
+
+        <h3 className="settings-title">🚨 Peringatan kapasitas</h3>
+
+        <div className="field">
+          <span>Batas orang: {settings.limit > 0 ? settings.limit : 'mati (0)'}</span>
+          <div className="row">
+            <button className="btn btn-small" onClick={() => setLimit(settings.limit - 1)}>−</button>
+            <input type="number" min="0" max="999" inputMode="numeric" value={settings.limit}
+                   onChange={(e) => setLimit(e.target.value)} />
+            <button className="btn btn-small" onClick={() => setLimit(settings.limit + 1)}>+</button>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Dihitung dari</span>
+          <select value={settings.metric} onChange={(e) => updateSettings({ metric: e.target.value })}>
+            <option value="current">Orang terlihat di kamera</option>
+            <option value="inside">Di dalam (masuk − keluar)</option>
+          </select>
+        </label>
+
+        <label className="check">
+          <input type="checkbox" checked={settings.sound}
+                 onChange={(e) => updateSettings({ sound: e.target.checked })} />
+          Bunyi &amp; getar saat melebihi batas
+        </label>
+
+        <div className="field">
+          <span>Notifikasi Telegram (opsional)</span>
+          <input type="password" autoComplete="off" placeholder="Token bot (dari @BotFather)"
+                 value={settings.token} onChange={(e) => updateSettings({ token: e.target.value })} />
+          <input type="text" autoComplete="off" placeholder="Chat ID"
+                 value={settings.chatId} onChange={(e) => updateSettings({ chatId: e.target.value })} />
+          <div className="row">
+            <button className="btn btn-small" onClick={handleTestTelegram}>📨 Tes kirim</button>
+            {tgStatus && <span className="hint">{tgStatus}</span>}
+          </div>
+          <p className="hint">
+            Dikirim langsung dari perangkat ini ke Telegram; token hanya disimpan di perangkat ini.
+            Peringatan menyala bila melewati batas &gt; 3 detik, lalu menunggu 1 menit sebelum berikutnya.
+          </p>
         </div>
       </details>
 

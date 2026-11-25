@@ -3,7 +3,7 @@
 .app-header h1 { font-size: 1.15rem; }
 .chip { font-size: 0.75rem; color: var(--muted); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; }
 
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 8px 4px; text-align: center; display: flex; flex-direction: column; gap: 2px; }
 .stat-value { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stat-label { font-size: 0.7rem; color: var(--muted); }
@@ -11,20 +11,35 @@
 .stat-big .stat-value { font-size: 3rem; color: var(--accent); line-height: 1; }
 .stat-big .stat-label { font-size: 0.85rem; }
 
+.alert-banner { background: var(--danger); color: #fff; border-radius: 12px; padding: 12px; font-weight: 700; text-align: center; animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.7; } }
+@media (prefers-reduced-motion: reduce) { .alert-banner { animation: none; } }
+
 .actions { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; }
+.toggles { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 14px 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #052e16; }
 .btn-stop { background: var(--danger); border-color: var(--danger); }
 .btn-small { padding: 10px 12px; font-size: 0.85rem; }
+.btn-on { background: #7c2d12; border-color: #f97316; }
 
 .settings { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
 .settings summary { cursor: pointer; font-weight: 600; }
 .settings .field { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; font-size: 0.85rem; color: var(--muted); }
-.settings .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.settings .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
 .settings .field .row { margin-top: 0; }
 .settings select { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 0.9rem; }
 .settings input[type='range'] { width: 100%; accent-color: var(--accent); }
+.settings input[type='number'], .settings input[type='text'], .settings input[type='password'] { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 1rem; }
+.settings .check { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 0.85rem; color: var(--muted); }
+.settings-title { margin-top: 18px; font-size: 0.9rem; }
+.hint { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+
+.chart { width: 100%; height: 90px; display: block; margin-top: 12px; background: var(--bg); border-radius: 8px; }
+.chart rect { fill: var(--accent); }
+.chart-axis { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--muted); margin-top: 4px; }
+.chart-summary { font-size: 0.85rem; margin-top: 8px; font-variant-numeric: tabular-nums; }
 
 .error-message { background: #450a0a; border: 1px solid var(--danger); border-radius: 12px; padding: 12px; font-size: 0.9rem; }
 .app-footer { text-align: center; font-size: 0.75rem; color: var(--muted); }

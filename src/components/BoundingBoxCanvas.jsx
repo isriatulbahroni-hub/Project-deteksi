@@ -10,6 +10,8 @@ import './BoundingBoxCanvas.css';
 export default function BoundingBoxCanvas({ 
   videoRef, 
   getTracks,
+  getHeatmap,
+  showHeatmap,
   isDetecting,
   line
 }) {
@@ -49,9 +51,11 @@ export default function BoundingBoxCanvas({
 
     // Gambar ulang tiap frame layar: kotak diekstrapolasi ke waktu sekarang agar halus.
     // Garis masuk/keluar selalu tampil supaya posisinya bisa diatur sebelum deteksi dimulai.
+    // Peta panas (bila dinyalakan) digambar paling bawah dan tetap tampil setelah deteksi berhenti.
     let raf;
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (showHeatmap && getHeatmap) drawHeatmap(ctx, getHeatmap());
       drawLine(ctx, lineRef.current);
       if (isDetecting) getTracks(performance.now()).forEach((detection) => drawBox(ctx, detection));
       raf = requestAnimationFrame(draw);
@@ -62,9 +66,24 @@ export default function BoundingBoxCanvas({
       cancelAnimationFrame(raf);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
-  }, [getTracks, isDetecting]);
+  }, [getTracks, getHeatmap, showHeatmap, isDetecting]);
 
   return <canvas ref={canvasRef} className="bounding-box-canvas" />;
+}
+
+// Biru (sepi) -> merah (ramai); sel yang hampir kosong tidak digambar.
+function drawHeatmap(ctx, { cols, rows, data, max }) {
+  if (!max || !rows) return;
+  const cw = ctx.canvas.width / cols;
+  const ch = ctx.canvas.height / rows;
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const v = data[y * cols + x] / max;
+      if (v < 0.05) continue;
+      ctx.fillStyle = `hsla(${Math.round(240 * (1 - v))}, 100%, 50%, ${0.15 + 0.45 * v})`;
+      ctx.fillRect(x * cw, y * ch, cw + 1, ch + 1);
+    }
+  }
 }
 
 function drawLine(ctx, line) {
