@@ -8,3 +8,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>,
 );
+
+// Offline: simpan aplikasi dan model di perangkat setelah dimuat sekali (hanya di versi produksi)
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Service worker gagal didaftarkan:', err);
+    });
+  });
+}
