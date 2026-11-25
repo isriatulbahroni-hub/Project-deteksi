@@ -1,0 +1,6 @@
+node_modules
+dist
+*.log
+.vercel
+# Model ONNX diunduh otomatis oleh scripts/fetch-models.mjs
+public/models/*.onnx
