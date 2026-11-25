@@ -7,15 +7,18 @@ import { useEffect } from 'react';
 import BoundingBoxCanvas from './BoundingBoxCanvas';
 import './CameraView.css';
 
-export default function CameraView({ 
-  videoRef, 
+export default function CameraView({
+  videoRef,
   stream,
   isFilePlaying,
   getTracks,
   getHeatmap,
   showHeatmap,
   isDetecting,
-  line
+  line,
+  extraLines,
+  zones,
+  zoneStats
 }) {
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -33,13 +36,16 @@ export default function CameraView({
           muted
           className="video-element"
         />
-        <BoundingBoxCanvas 
-          videoRef={videoRef} 
+        <BoundingBoxCanvas
+          videoRef={videoRef}
           getTracks={getTracks}
           getHeatmap={getHeatmap}
           showHeatmap={showHeatmap}
           isDetecting={isDetecting}
           line={line}
+          extraLines={extraLines}
+          zones={zones}
+          zoneStats={zoneStats}
         />
       </div>
       {!stream && !isFilePlaying && (

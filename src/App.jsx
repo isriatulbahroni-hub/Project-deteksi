@@ -6,9 +6,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useCamera } from './hooks/useCamera';
 import { useObjectDetection } from './hooks/useObjectDetection';
 import { useAnalytics } from './hooks/useAnalytics';
+import { useWakeLock } from './hooks/useWakeLock';
 import { formatDuration } from './utils/analytics';
+import { PRESETS, TARGETS } from './utils/presets';
 import CameraView from './components/CameraView';
 import Dashboard from './components/Dashboard';
+import LinesZonesPanel from './components/LinesZonesPanel';
 import './App.css';
 
 const TIER_LABEL = { fast: 'Cepat', accurate: 'Akurat' };
@@ -31,16 +34,23 @@ function App() {
   const {
     model, isLoading: isModelLoading, error: modelError, isRunning: isDetecting,
     fps, getTracks, getHeatmap, stats, line, setLine, resetStats, threshold, setThreshold,
+    extraLines, addLine, updateLine, removeLine,
+    zones, addZone, updateZone, removeZone,
+    target, setTarget, tilingMode, setTilingMode, tilingOn, tilingSuspended, applyPreset,
     tier, executionProvider, initializeModel, startDetection, stopDetection,
   } = useObjectDetection();
 
   const analytics = useAnalytics(stats, isDetecting);
   const { settings, updateSettings } = analytics;
 
+  useWakeLock(isDetecting); // layar tetap menyala selama deteksi berjalan
+
   const [videoFileUrl, setVideoFileUrl] = useState(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [tgStatus, setTgStatus] = useState('');
   const fileInputRef = useRef(null);
+
+  const noun = TARGETS[target].noun;
 
   // Kamera dan model dimuat otomatis, jadi pengguna tinggal menekan "Mulai"
   useEffect(() => {
@@ -83,6 +93,12 @@ function App() {
 
   const handleSwitchCamera = () => withDetectionPaused(switchCamera);
 
+  const handlePreset = (key) => {
+    const preset = PRESETS[key];
+    applyPreset(preset);
+    setShowHeatmap(preset.heatmap);
+  };
+
   const setLimit = (n) => updateSettings({ limit: Math.min(999, Math.max(0, Math.round(Number(n)) || 0)) });
 
   const handleTestTelegram = async () => {
@@ -92,13 +108,19 @@ function App() {
   };
 
   const error = cameraError || modelError;
+  const lineStat = (id) => stats.lines.find((s) => s.id === id) ?? { in: 0, out: 0 };
+  const zoneStat = (id) => stats.zones.find((s) => s.id === id) ?? { current: 0, peak: 0, avgSec: 0 };
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>👥 Penghitung Orang AI</h1>
+        <h1>{TARGETS[target].icon} Penghitung {noun} AI</h1>
         <span className="chip">
-          {isModelLoading ? 'Memuat model…' : model ? `${TIER_LABEL[tier] ?? tier} · ${executionProvider}${isDetecting ? ` · ${fps} FPS` : ''}` : 'Model belum siap'}
+          {isModelLoading
+            ? 'Memuat model…'
+            : model
+              ? `${TIER_LABEL[tier] ?? tier} · ${executionProvider}${tilingOn ? ' · Tajam' : ''}${isDetecting ? ` · ${fps} FPS` : ''}`
+              : 'Model belum siap'}
         </span>
       </header>
 
@@ -111,6 +133,9 @@ function App() {
         showHeatmap={showHeatmap}
         isDetecting={isDetecting}
         line={line}
+        extraLines={extraLines}
+        zones={zones}
+        zoneStats={stats.zones}
       />
 
       {analytics.over && (
@@ -120,13 +145,22 @@ function App() {
       )}
 
       <section className="stats">
-        <Stat big label="Orang terlihat" value={stats.current} />
+        <Stat big label={`${noun} terlihat`} value={stats.current} />
         <Stat label="Masuk" value={stats.in} />
         <Stat label="Keluar" value={stats.out} />
         <Stat label="Di dalam (masuk − keluar)" value={Math.max(0, stats.in - stats.out)} />
         <Stat label="Puncak" value={stats.peak} />
         <Stat label="Total unik" value={stats.unique} />
         <Stat label="Lama terlihat (rata-rata)" value={formatDuration(stats.dwellSec)} />
+        {extraLines.map((l) => (
+          <Stat key={l.id} label={`${l.name} (masuk / keluar)`} value={`${lineStat(l.id).in} / ${lineStat(l.id).out}`} />
+        ))}
+        {zones.map((z) => (
+          <Stat key={z.id} label={`${z.name} (sekarang · puncak)`} value={`${zoneStat(z.id).current} · ${zoneStat(z.id).peak}`} />
+        ))}
+        {zones.map((z) => (
+          <Stat key={`d${z.id}`} label={`${z.name} (rata-rata di dalam)`} value={formatDuration(zoneStat(z.id).avgSec)} />
+        ))}
       </section>
 
       <section className="actions">
@@ -142,6 +176,12 @@ function App() {
       </section>
 
       <section className="toggles">
+        {Object.entries(PRESETS).map(([key, preset]) => (
+          <button key={key} className="btn btn-small" onClick={() => handlePreset(key)}>{preset.label}</button>
+        ))}
+      </section>
+
+      <section className="toggles">
         <button className={`btn btn-small${showHeatmap ? ' btn-on' : ''}`} aria-pressed={showHeatmap}
                 onClick={() => setShowHeatmap((v) => !v)}>
           🔥 Peta panas {showHeatmap ? 'hidup' : 'mati'}
@@ -152,6 +192,15 @@ function App() {
 
       <details className="settings">
         <summary>⚙️ Pengaturan</summary>
+
+        <label className="field">
+          <span>Objek yang dihitung</span>
+          <select value={target} onChange={(e) => setTarget(e.target.value)}>
+            {Object.entries(TARGETS).map(([key, t]) => (
+              <option key={key} value={key}>{t.icon} {t.noun}</option>
+            ))}
+          </select>
+        </label>
 
         <label className="field">
           <span>Garis hitung</span>
@@ -170,6 +219,12 @@ function App() {
                  onChange={(e) => setLine({ pos: Number(e.target.value) / 100 })} />
         </label>
 
+        <LinesZonesPanel
+          extraLines={extraLines} zones={zones}
+          onAddLine={addLine} onUpdateLine={updateLine} onRemoveLine={removeLine}
+          onAddZone={addZone} onUpdateZone={updateZone} onRemoveZone={removeZone}
+        />
+
         <label className="field">
           <span>Sensitivitas deteksi: {Math.round(threshold * 100)}%</span>
           <input type="range" min="10" max="80" value={Math.round(threshold * 100)}
@@ -185,6 +240,19 @@ function App() {
           </select>
         </label>
 
+        <label className="field">
+          <span>Mode tajam (video potret){tilingOn ? ' — aktif' : ''}</span>
+          <select value={tilingMode} onChange={(e) => setTilingMode(e.target.value)}>
+            <option value="auto">Otomatis (sesuai kecepatan HP)</option>
+            <option value="on">Selalu tajam (lebih berat)</option>
+            <option value="off">Standar</option>
+          </select>
+          <p className="hint">
+            Memotong video potret jadi bagian-bagian agar orang yang jauh/kecil lebih mudah terdeteksi.
+            Memakai 3× komputasi.{tilingSuspended ? ' Dimatikan sementara karena FPS terlalu rendah.' : ''}
+          </p>
+        </label>
+
         <div className="row">
           <button className="btn btn-small" onClick={() => fileInputRef.current?.click()}>🎞️ Uji dengan video</button>
           {videoFileUrl && <button className="btn btn-small" onClick={handleUseCamera}>📷 Kembali ke kamera</button>}
@@ -195,7 +263,7 @@ function App() {
         <h3 className="settings-title">🚨 Peringatan kapasitas</h3>
 
         <div className="field">
-          <span>Batas orang: {settings.limit > 0 ? settings.limit : 'mati (0)'}</span>
+          <span>Batas jumlah: {settings.limit > 0 ? settings.limit : 'mati (0)'}</span>
           <div className="row">
             <button className="btn btn-small" onClick={() => setLimit(settings.limit - 1)}>−</button>
             <input type="number" min="0" max="999" inputMode="numeric" value={settings.limit}
@@ -207,7 +275,7 @@ function App() {
         <label className="field">
           <span>Dihitung dari</span>
           <select value={settings.metric} onChange={(e) => updateSettings({ metric: e.target.value })}>
-            <option value="current">Orang terlihat di kamera</option>
+            <option value="current">{noun} terlihat di kamera</option>
             <option value="inside">Di dalam (masuk − keluar)</option>
           </select>
         </label>
