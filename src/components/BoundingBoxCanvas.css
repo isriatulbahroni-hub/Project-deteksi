@@ -8,3 +8,5 @@
   pointer-events: none;
   z-index: 5;
 }
+/* Mode "Gambar zona": kanvas menerima sentuhan; touch-action none mencegah halaman ikut bergulir saat menyeret titik */
+.bounding-box-canvas.drawing { pointer-events: auto; touch-action: none; cursor: crosshair; }

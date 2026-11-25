@@ -18,7 +18,11 @@ export default function CameraView({
   line,
   extraLines,
   zones,
-  zoneStats
+  zoneStats,
+  draft,
+  onDraftAdd,
+  onDraftMove,
+  onDraftSelect
 }) {
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -46,6 +50,10 @@ export default function CameraView({
           extraLines={extraLines}
           zones={zones}
           zoneStats={zoneStats}
+          draft={draft}
+          onDraftAdd={onDraftAdd}
+          onDraftMove={onDraftMove}
+          onDraftSelect={onDraftSelect}
         />
       </div>
       {!stream && !isFilePlaying && (

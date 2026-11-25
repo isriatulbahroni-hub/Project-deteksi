@@ -9,7 +9,7 @@ import { processOutput, scaleDetections } from '../utils/postprocessing';
 import { createTracker } from '../utils/tracker';
 import { createCounter, DEFAULT_LINE } from '../utils/counter';
 import { createLineSet } from '../utils/lines';
-import { createZoneTracker, rectPolygon } from '../utils/zones';
+import { createZoneTracker, normalizeZone, normalizeZones, rectPolygon } from '../utils/zones';
 import { planTiles, placeTileDetections, mergeDetections } from '../utils/tiling';
 import { createHeatmap } from '../utils/heatmap';
 import { createDwell } from '../utils/dwell';
@@ -27,7 +27,6 @@ const CONFIG_KEY = 'deteksi:config:v1';
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const clamp = (v, lo, hi, fallback) => (isNum(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
 const validLine = (l) => !!l && isNum(l.id) && (l.orientation === 'h' || l.orientation === 'v') && isNum(l.pos);
-const validZone = (z) => !!z && isNum(z.id) && [z.x, z.y, z.w, z.h].every(isNum);
 const cleanLine = (l) => ({
   id: l.id,
   name: String(l.name ?? `Garis ${l.id}`),
@@ -35,26 +34,14 @@ const cleanLine = (l) => ({
   pos: clamp(l.pos, 0.05, 0.95, 0.5),
   flip: !!l.flip,
 });
-const cleanZone = (z) => {
-  const x = clamp(z.x, 0, 0.9, 0.1);
-  const y = clamp(z.y, 0, 0.9, 0.1);
-  return {
-    id: z.id,
-    name: String(z.name ?? `Zona ${z.id}`),
-    x,
-    y,
-    w: clamp(z.w, 0.05, 1 - x, 0.5),
-    h: clamp(z.h, 0.05, 1 - y, 0.5),
-  };
-};
-
 function readConfig() {
   const c = loadJson(CONFIG_KEY, {}) ?? {};
   const line = validLine({ id: 0, ...c.line })
     ? { orientation: c.line.orientation, pos: clamp(c.line.pos, 0.05, 0.95, 0.5), flip: !!c.line.flip }
     : DEFAULT_LINE;
   const extraLines = (Array.isArray(c.extraLines) ? c.extraLines : []).filter(validLine).slice(0, MAX_EXTRA).map(cleanLine);
-  const zones = (Array.isArray(c.zones) ? c.zones : []).filter(validZone).slice(0, MAX_EXTRA).map(cleanZone);
+  // Zona lama berbentuk { x, y, w, h } otomatis dimigrasikan menjadi poligon { id, name, points }
+  const zones = normalizeZones(c.zones, MAX_EXTRA);
   return {
     line,
     extraLines,
@@ -72,8 +59,6 @@ function uniqueName(prefix, list, start) {
   while (used.has(`${prefix} ${n}`)) n++;
   return `${prefix} ${n}`;
 }
-
-const toPolygons = (zones) => zones.map((z) => ({ id: z.id, points: rectPolygon(z.x, z.y, z.w, z.h) }));
 
 async function loadLabels(path) {
   if (!path) return COCO_CLASSES;
@@ -186,25 +171,19 @@ export function useObjectDetection() {
     commitExtraLines(extraLinesRef.current.filter((l) => l.id !== id));
   }, [commitExtraLines]);
 
-  const addZone = useCallback(() => {
+  // Tambah zona poligon; tanpa `points` dipakai persegi panjang bawaan
+  const addZone = useCallback((points = rectPolygon(0.15, 0.25, 0.7, 0.6)) => {
     const list = zonesRef.current;
     if (list.length >= MAX_EXTRA) return;
-    commitZones([
-      ...list,
-      { id: nextIdRef.current++, name: uniqueName('Zona', list, list.length + 1), x: 0.15, y: 0.25, w: 0.7, h: 0.6 },
-    ]);
+    const zone = normalizeZone({ id: nextIdRef.current, name: uniqueName('Zona', list, list.length + 1), points });
+    if (!zone) return;
+    nextIdRef.current++;
+    commitZones([...list, zone]);
   }, [commitZones]);
 
+  // `patch` boleh berisi `name` dan/atau `points`; hasil yang tidak valid diabaikan
   const updateZone = useCallback((id, patch) => {
-    commitZones(zonesRef.current.map((z) => {
-      if (z.id !== id) return z;
-      const n = { ...z, ...patch };
-      n.w = Math.min(1, Math.max(0.05, n.w));
-      n.h = Math.min(1, Math.max(0.05, n.h));
-      n.x = Math.min(1 - n.w, Math.max(0, n.x));
-      n.y = Math.min(1 - n.h, Math.max(0, n.y));
-      return n;
-    }));
+    commitZones(zonesRef.current.map((z) => (z.id === id ? normalizeZone({ ...z, ...patch }) ?? z : z)));
   }, [commitZones]);
 
   const removeZone = useCallback((id) => {
@@ -243,7 +222,7 @@ export function useObjectDetection() {
     lineRef.current = { ...preset.line };
     setLineState(lineRef.current);
     commitExtraLines(preset.extraLines.map((l, i) => ({ name: `Garis ${i + 2}`, ...l, id: nextIdRef.current++ })));
-    commitZones(preset.zones.map((z) => ({ ...z, id: nextIdRef.current++ })));
+    commitZones(preset.zones.map((z) => ({ id: nextIdRef.current++, name: z.name, points: z.points.map((p) => [...p]) })));
     targetRef.current = TARGETS[preset.target].classes;
     setTargetState(preset.target);
     thresholdRef.current = preset.threshold;
@@ -345,7 +324,7 @@ export function useObjectDetection() {
       const before = counter.snapshot();
       counter.update(people, dims, lineRef.current);
       lineSetRef.current.update(people, dims, extraLinesRef.current);
-      zoneTrackerRef.current.update(people, dims, toPolygons(zonesRef.current), now);
+      zoneTrackerRef.current.update(people, dims, zonesRef.current, now);
       heatmapRef.current.add(people, dims);
       dwellRef.current.update(people, now);
       const after = counter.snapshot();
@@ -358,7 +337,7 @@ export function useObjectDetection() {
           ...after,
           dwellSec: dwellRef.current.snapshot().avgSec,
           lines: lineSetRef.current.snapshot(extraLinesRef.current),
-          zones: zoneTrackerRef.current.snapshot(toPolygons(zonesRef.current), now),
+          zones: zoneTrackerRef.current.snapshot(zonesRef.current, now),
         });
       }
       if (now - lastTime >= 1000) {

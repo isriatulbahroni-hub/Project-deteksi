@@ -43,3 +43,8 @@
 
 .error-message { background: #450a0a; border: 1px solid var(--danger); border-radius: 12px; padding: 12px; font-size: 0.9rem; }
 .app-footer { text-align: center; font-size: 0.75rem; color: var(--muted); }
+
+/* Mode "Gambar zona": panel tombol tepat di bawah video */
+.draw-bar { background: var(--card); border: 1px solid #FACC15; border-radius: 12px; padding: 10px; }
+.draw-bar .hint { margin: 0 0 8px; }
+.draw-bar-actions { display: grid; grid-template-columns: 2fr 1.4fr 1fr; gap: 8px; }

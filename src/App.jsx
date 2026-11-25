@@ -7,8 +7,9 @@ import { useCamera } from './hooks/useCamera';
 import { useObjectDetection } from './hooks/useObjectDetection';
 import { useAnalytics } from './hooks/useAnalytics';
 import { useWakeLock } from './hooks/useWakeLock';
+import { useZoneDraw } from './hooks/useZoneDraw';
 import { formatDuration } from './utils/analytics';
-import { PRESETS, TARGETS } from './utils/presets';
+import { MAX_EXTRA, PRESETS, TARGETS } from './utils/presets';
 import CameraView from './components/CameraView';
 import Dashboard from './components/Dashboard';
 import LinesZonesPanel from './components/LinesZonesPanel';
@@ -39,6 +40,8 @@ function App() {
     target, setTarget, tilingMode, setTilingMode, tilingOn, tilingSuspended, applyPreset,
     tier, executionProvider, initializeModel, startDetection, stopDetection,
   } = useObjectDetection();
+
+  const draw = useZoneDraw({ zones, addZone, updateZone });
 
   const analytics = useAnalytics(stats, isDetecting);
   const { settings, updateSettings } = analytics;
@@ -93,8 +96,16 @@ function App() {
 
   const handleSwitchCamera = () => withDetectionPaused(switchCamera);
 
+  // Mulai menggambar/mengubah zona, lalu bawa video ke tengah layar supaya mudah disentuh
+  const startDrawing = (id) => {
+    if (id === undefined) draw.startNew();
+    else draw.startEdit(id);
+    videoRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+
   const handlePreset = (key) => {
     const preset = PRESETS[key];
+    draw.cancel(); // preset mengganti semua zona, jadi draf yang sedang digambar dibatalkan
     applyPreset(preset);
     setShowHeatmap(preset.heatmap);
   };
@@ -136,7 +147,25 @@ function App() {
         extraLines={extraLines}
         zones={zones}
         zoneStats={stats.zones}
+        draft={draw.draft}
+        onDraftAdd={draw.add}
+        onDraftMove={draw.move}
+        onDraftSelect={draw.select}
       />
+
+      {draw.drawing && (
+        <section className="draw-bar" role="group" aria-label="Gambar zona">
+          <p className="hint">
+            ✏️ {draw.draft.editingId !== null ? 'Ubah bentuk zona' : 'Gambar zona'}: ketuk video untuk menaruh titik,
+            seret titik untuk menggeser. Titik: {draw.draft.points.length} (minimal 3)
+          </p>
+          <div className="draw-bar-actions">
+            <button className="btn btn-primary" onClick={draw.finish} disabled={!draw.canFinish}>✔ Selesai</button>
+            <button className="btn" onClick={draw.removePoint} disabled={draw.draft.points.length === 0}>⌫ Hapus titik</button>
+            <button className="btn" onClick={draw.cancel}>✕ Batal</button>
+          </div>
+        </section>
+      )}
 
       {analytics.over && (
         <div className="alert-banner" role="alert">
@@ -186,6 +215,10 @@ function App() {
                 onClick={() => setShowHeatmap((v) => !v)}>
           🔥 Peta panas {showHeatmap ? 'hidup' : 'mati'}
         </button>
+        <button className="btn btn-small" disabled={draw.drawing || zones.length >= MAX_EXTRA}
+                onClick={() => startDrawing()}>
+          📍 Gambar zona
+        </button>
       </section>
 
       <Dashboard history={analytics.history} onClear={analytics.clearHistory} />
@@ -222,7 +255,8 @@ function App() {
         <LinesZonesPanel
           extraLines={extraLines} zones={zones}
           onAddLine={addLine} onUpdateLine={updateLine} onRemoveLine={removeLine}
-          onAddZone={addZone} onUpdateZone={updateZone} onRemoveZone={removeZone}
+          onDrawZone={() => startDrawing()} onEditZone={startDrawing} onRemoveZone={removeZone}
+          drawing={draw.drawing}
         />
 
         <label className="field">

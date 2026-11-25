@@ -17,6 +17,37 @@ export function pointInPolygon(x, y, poly) {
 
 export const rectPolygon = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
 
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const clamp = (v, lo, hi, fallback) => (isNum(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+
+/**
+ * Rapikan satu zona dari penyimpanan/pengguna menjadi { id, name, points } (titik 0..1), atau null
+ * bila tidak valid. Pengaturan lama yang berbentuk persegi panjang { x, y, w, h } otomatis
+ * dimigrasikan menjadi poligon empat titik.
+ */
+export function normalizeZone(z) {
+  if (!z || !isNum(z.id)) return null;
+  const name = String(z.name ?? `Zona ${z.id}`);
+  if (Array.isArray(z.points)) {
+    const points = z.points
+      .filter((p) => Array.isArray(p) && isNum(p[0]) && isNum(p[1]))
+      .map(([x, y]) => [clamp(x, 0, 1, 0), clamp(y, 0, 1, 0)]);
+    return points.length >= 3 ? { id: z.id, name, points } : null;
+  }
+  if ([z.x, z.y, z.w, z.h].every(isNum)) {
+    const x = clamp(z.x, 0, 0.9, 0.1);
+    const y = clamp(z.y, 0, 0.9, 0.1);
+    const w = clamp(z.w, 0.05, 1 - x, 0.5);
+    const h = clamp(z.h, 0.05, 1 - y, 0.5);
+    return { id: z.id, name, points: rectPolygon(x, y, w, h) };
+  }
+  return null;
+}
+
+/** Rapikan daftar zona (membuang yang tidak valid) dan batasi jumlahnya. */
+export const normalizeZones = (list, max = Infinity) =>
+  (Array.isArray(list) ? list : []).map(normalizeZone).filter(Boolean).slice(0, max);
+
 export function createZoneTracker() {
   const entered = new Map(); // id zona -> Map(id orang -> waktu masuk, ms)
   const peaks = new Map();   // id zona -> jumlah terbanyak sekaligus di dalam

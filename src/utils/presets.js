@@ -3,6 +3,8 @@
  * Kelas mengikuti label COCO yang dipakai model.
  */
 
+import { rectPolygon } from './zones.js';
+
 export const TARGETS = {
   person: { icon: '👥', noun: 'Orang', classes: new Set(['person']) },
   vehicle: { icon: '🚗', noun: 'Kendaraan', classes: new Set(['bicycle', 'motorcycle', 'car', 'bus', 'truck']) },
@@ -21,7 +23,7 @@ const CLASS_NAMES_ID = {
 
 export const labelFor = (className) => CLASS_NAMES_ID[className] ?? className;
 
-/** Skenario siap pakai: hanya kombinasi pengaturan (objek, garis, zona, sensitivitas, peta panas). */
+/** Skenario siap pakai: hanya kombinasi pengaturan (objek, garis, zona poligon, sensitivitas, peta panas). */
 export const PRESETS = {
   gate: {
     label: '🚪 Pintu masuk',
@@ -39,7 +41,7 @@ export const PRESETS = {
     heatmap: false,
     line: { orientation: 'h', pos: 0.5, flip: false },
     extraLines: [],
-    zones: [{ name: 'Area antrean', x: 0.1, y: 0.2, w: 0.8, h: 0.7 }],
+    zones: [{ name: 'Area antrean', points: rectPolygon(0.1, 0.2, 0.8, 0.7) }],
   },
   crowd: {
     label: '🏟️ Area ramai',
@@ -48,7 +50,7 @@ export const PRESETS = {
     heatmap: true,
     line: { orientation: 'h', pos: 0.5, flip: false },
     extraLines: [],
-    zones: [{ name: 'Seluruh area', x: 0.02, y: 0.02, w: 0.96, h: 0.96 }],
+    zones: [{ name: 'Seluruh area', points: rectPolygon(0.02, 0.02, 0.96, 0.96) }],
   },
   traffic: {
     label: '🚗 Lalu lintas',
