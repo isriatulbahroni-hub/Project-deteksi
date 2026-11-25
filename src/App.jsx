@@ -9,6 +9,8 @@ import { useAnalytics } from './hooks/useAnalytics';
 import { useWakeLock } from './hooks/useWakeLock';
 import { useZoneDraw } from './hooks/useZoneDraw';
 import { formatDuration } from './utils/analytics';
+import { QUICK_PICKS, displayName } from './utils/openVocab';
+import { OPEN_MODELS } from './utils/openVocabClient';
 import { MAX_EXTRA, PRESETS, TARGETS } from './utils/presets';
 import CameraView from './components/CameraView';
 import Dashboard from './components/Dashboard';
@@ -34,10 +36,11 @@ function App() {
 
   const {
     model, isLoading: isModelLoading, error: modelError, isRunning: isDetecting,
-    fps, getTracks, getHeatmap, stats, line, setLine, resetStats, threshold, setThreshold,
+    fps, getTracks, getHeatmap, stats, line, setLine, resetStats,
     extraLines, addLine, updateLine, removeLine,
     zones, addZone, updateZone, removeZone,
     target, setTarget, tilingMode, setTilingMode, tilingOn, tilingSuspended, applyPreset,
+    customQuery, setCustomQuery, openModel, setOpenModel, openStatus, activeThreshold, setActiveThreshold,
     tier, executionProvider, initializeModel, startDetection, stopDetection,
   } = useObjectDetection();
 
@@ -53,7 +56,23 @@ function App() {
   const [tgStatus, setTgStatus] = useState('');
   const fileInputRef = useRef(null);
 
-  const noun = TARGETS[target].noun;
+  const isCustom = target === 'custom';
+  const noun = isCustom ? displayName(customQuery) || TARGETS.custom.noun : TARGETS[target].noun;
+  const [queryDraft, setQueryDraft] = useState(customQuery);
+
+  const submitQuery = (text) => {
+    const q = text ?? queryDraft;
+    if (!q.trim()) return;
+    setQueryDraft(q);
+    setCustomQuery(q);
+  };
+
+  const openStatusText = {
+    idle: 'Ketik nama objek lalu tekan Hitung.',
+    loading: `Mengunduh model deteksi bebas… ${openStatus.percent}% (pertama kali saja, lalu tersimpan)`,
+    ready: 'Model deteksi bebas siap.',
+    error: `Model gagal dimuat: ${openStatus.error}`,
+  }[openStatus.state];
 
   // Kamera dan model dimuat otomatis, jadi pengguna tinggal menekan "Mulai"
   useEffect(() => {
@@ -130,7 +149,9 @@ function App() {
           {isModelLoading
             ? 'Memuat model…'
             : model
-              ? `${TIER_LABEL[tier] ?? tier} · ${executionProvider}${tilingOn ? ' · Tajam' : ''}${isDetecting ? ` · ${fps} FPS` : ''}`
+              ? isCustom
+                ? `Bebas · ${OPEN_MODELS[openModel].label}${isDetecting ? ` · ${fps} FPS` : ''}`
+                : `${TIER_LABEL[tier] ?? tier} · ${executionProvider}${tilingOn ? ' · Tajam' : ''}${isDetecting ? ` · ${fps} FPS` : ''}`
               : 'Model belum siap'}
         </span>
       </header>
@@ -152,6 +173,23 @@ function App() {
         onDraftMove={draw.move}
         onDraftSelect={draw.select}
       />
+
+      <section className="open-search" aria-label="Hitung apa saja">
+        <div className="open-search-row">
+          <input type="text" value={queryDraft} placeholder="Hitung apa saja: pupuk, karung, botol…"
+                 maxLength={40} autoComplete="off" enterKeyHint="search"
+                 onChange={(e) => setQueryDraft(e.target.value)}
+                 onKeyDown={(e) => e.key === 'Enter' && submitQuery()} />
+          <button className="btn btn-primary" onClick={() => submitQuery()} disabled={!queryDraft.trim()}>🔍 Hitung</button>
+        </div>
+        <div className="chips">
+          {QUICK_PICKS.map((q) => (
+            <button key={q} className={`btn btn-small${isCustom && customQuery === q ? ' btn-on' : ''}`}
+                    onClick={() => submitQuery(q)}>{q}</button>
+          ))}
+        </div>
+        {(isCustom || openStatus.state !== 'idle') && <p className="hint">{openStatusText}</p>}
+      </section>
 
       {draw.drawing && (
         <section className="draw-bar" role="group" aria-label="Gambar zona">
@@ -260,9 +298,22 @@ function App() {
         />
 
         <label className="field">
-          <span>Sensitivitas deteksi: {Math.round(threshold * 100)}%</span>
-          <input type="range" min="10" max="80" value={Math.round(threshold * 100)}
-                 onChange={(e) => setThreshold(Number(e.target.value) / 100)} />
+          <span>Sensitivitas deteksi: {Math.round(activeThreshold * 100)}%</span>
+          <input type="range" min="5" max="80" value={Math.round(activeThreshold * 100)}
+                 onChange={(e) => setActiveThreshold(Number(e.target.value) / 100)} />
+        </label>
+
+        <label className="field">
+          <span>Model deteksi bebas</span>
+          <select value={openModel} onChange={(e) => { stopDetection(); setOpenModel(e.target.value); }}>
+            {Object.entries(OPEN_MODELS).map(([key, m]) => (
+              <option key={key} value={key}>{m.label}</option>
+            ))}
+          </select>
+          <p className="hint">
+            Dipakai saat kamu mengetik nama objek. Cepat ≈ 150 MB, Akurat ≈ 155 MB tapi jauh lebih lambat per gambar.
+            Diunduh sekali, lalu tersimpan di perangkat. Skor model bebas lebih rendah, jadi sensitivitas bawaannya 15%.
+          </p>
         </label>
 
         <label className="field">

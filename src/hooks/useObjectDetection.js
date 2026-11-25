@@ -14,6 +14,8 @@ import { planTiles, placeTileDetections, mergeDetections } from '../utils/tiling
 import { createHeatmap } from '../utils/heatmap';
 import { createDwell } from '../utils/dwell';
 import { loadJson, saveJson } from '../utils/storage';
+import { buildPrompt, cleanQuery, displayName } from '../utils/openVocab';
+import { createOpenVocab, OPEN_MODELS } from '../utils/openVocabClient';
 import { MODEL_CONFIG, MODELS, COCO_CLASSES } from '../utils/constants';
 import { TARGETS, TILING_AUTO_MS, MIN_TILE_FPS, MAX_EXTRA } from '../utils/presets';
 
@@ -22,6 +24,7 @@ const inputShape = (cfg) => [1, 3, cfg.inputHeight, cfg.inputWidth];
 const EMPTY_STATS = { current: 0, in: 0, out: 0, peak: 0, unique: 0, dwellSec: 0, lines: [], zones: [] };
 
 const CONFIG_KEY = 'deteksi:config:v1';
+const OPEN_THRESHOLD_DEFAULT = 0.15; // skor model bebas lebih rendah daripada model YOLO biasa
 
 // --- Pengaturan yang disimpan di perangkat (garis, zona, objek, sensitivitas, mode tajam) ---
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -49,6 +52,9 @@ function readConfig() {
     target: TARGETS[c.target] ? c.target : 'person',
     threshold: clamp(c.threshold, 0.1, 0.8, MODEL_CONFIG.confidenceThreshold),
     tilingMode: ['auto', 'on', 'off'].includes(c.tilingMode) ? c.tilingMode : 'auto',
+    customQuery: cleanQuery(c.customQuery),
+    openModel: OPEN_MODELS[c.openModel] ? c.openModel : 'fast',
+    openThreshold: clamp(c.openThreshold, 0.05, 0.8, OPEN_THRESHOLD_DEFAULT),
     nextId: 1 + Math.max(0, ...extraLines.map((l) => l.id), ...zones.map((z) => z.id)),
   };
 }
@@ -110,6 +116,10 @@ export function useObjectDetection() {
   const [target, setTargetState] = useState(initial.target);
   const [tilingMode, setTilingModeState] = useState(initial.tilingMode);
   const [tilingSuspended, setTilingSuspended] = useState(false); // mode tajam dimatikan karena FPS rendah
+  const [customQuery, setCustomQueryState] = useState(initial.customQuery); // objek bebas yang diketik pengguna
+  const [openModel, setOpenModelState] = useState(initial.openModel);
+  const [openThreshold, setOpenThresholdState] = useState(initial.openThreshold);
+  const [openStatus, setOpenStatus] = useState({ state: 'idle', percent: 0, error: null });
 
   // Incremented on every start/stop; a loop iteration exits if its id is stale.
   const loopIdRef = useRef(0);
@@ -124,9 +134,18 @@ export function useObjectDetection() {
   const lineRef = useRef(initial.line); // garis masuk/keluar utama, dibaca loop tanpa restart
   const extraLinesRef = useRef(initial.extraLines);
   const zonesRef = useRef(initial.zones);
-  const targetRef = useRef(TARGETS[initial.target].classes); // kelas objek yang dihitung
+  const targetRef = useRef(
+    initial.target === 'custom' ? new Set([displayName(initial.customQuery)]) : TARGETS[initial.target].classes
+  ); // kelas objek yang dihitung
   const nextIdRef = useRef(initial.nextId);
   const tilingActiveRef = useRef(false);
+  // Deteksi bebas: aktif bila target = 'custom'. Worker dibuat saat pertama dibutuhkan.
+  const customRef = useRef(initial.target === 'custom');
+  const queryRef = useRef(initial.customQuery);
+  const openModelRef = useRef(initial.openModel);
+  const openThresholdRef = useRef(initial.openThreshold);
+  const openRef = useRef(null); // { client, modelKey } setelah dimuat
+  const openLoadingRef = useRef(null); // janji pemuatan yang sedang berjalan
 
   // Mode tajam: otomatis menyala di perangkat yang cukup cepat, atau dipaksa pengguna.
   const tilingOn = !tilingSuspended && (tilingMode === 'on' || (tilingMode === 'auto' && !!model && model.ms < TILING_AUTO_MS));
@@ -136,8 +155,8 @@ export function useObjectDetection() {
 
   // Simpan pengaturan di perangkat supaya tidak hilang saat halaman dibuka lagi
   useEffect(() => {
-    saveJson(CONFIG_KEY, { line, extraLines, zones, target, threshold, tilingMode });
-  }, [line, extraLines, zones, target, threshold, tilingMode]);
+    saveJson(CONFIG_KEY, { line, extraLines, zones, target, threshold, tilingMode, customQuery, openModel, openThreshold });
+  }, [line, extraLines, zones, target, threshold, tilingMode, customQuery, openModel, openThreshold]);
 
   const setLine = useCallback((patch) => {
     lineRef.current = { ...lineRef.current, ...patch };
@@ -207,10 +226,69 @@ export function useObjectDetection() {
   // Ganti objek yang dihitung (orang / kendaraan / hewan); hitungan lama tidak relevan lagi
   const setTarget = useCallback((key) => {
     if (!TARGETS[key]) return;
-    targetRef.current = TARGETS[key].classes;
+    customRef.current = key === 'custom';
+    targetRef.current = key === 'custom' ? new Set([displayName(queryRef.current)]) : TARGETS[key].classes;
     setTargetState(key);
     resetStats();
   }, [resetStats]);
+
+  // Muat model deteksi bebas bila belum (atau bila model berganti). Aman dipanggil berulang.
+  const ensureOpenModel = useCallback(async () => {
+    const wanted = openModelRef.current;
+    if (openRef.current?.modelKey === wanted) return openRef.current.client;
+    if (openLoadingRef.current) await openLoadingRef.current.catch(() => {});
+    if (openRef.current?.modelKey === wanted) return openRef.current.client;
+    const task = (async () => {
+      setOpenStatus({ state: 'loading', percent: 0, error: null });
+      try {
+        const client = openRef.current?.client ?? createOpenVocab();
+        await client.load(wanted, (p) => setOpenStatus({ state: 'loading', percent: Math.round(p.progress ?? 0), error: null }));
+        openRef.current = { client, modelKey: wanted };
+        setOpenStatus({ state: 'ready', percent: 100, error: null });
+        return client;
+      } catch (err) {
+        console.error('Model deteksi bebas gagal dimuat:', err);
+        setOpenStatus({ state: 'error', percent: 0, error: err.message });
+        throw err;
+      }
+    })();
+    openLoadingRef.current = task;
+    try {
+      return await task;
+    } finally {
+      openLoadingRef.current = null;
+    }
+  }, []);
+
+  // Ketik nama objek yang mau dihitung (Indonesia atau Inggris); langsung beralih ke mode bebas
+  const setCustomQuery = useCallback((text) => {
+    const q = cleanQuery(text);
+    queryRef.current = q;
+    setCustomQueryState(q);
+    customRef.current = true;
+    targetRef.current = new Set([displayName(q)]);
+    setTargetState('custom');
+    resetStats();
+    if (q) ensureOpenModel().catch(() => {});
+  }, [resetStats, ensureOpenModel]);
+
+  const setOpenModel = useCallback((key) => {
+    if (!OPEN_MODELS[key]) return;
+    openModelRef.current = key;
+    setOpenModelState(key);
+    if (customRef.current && queryRef.current) ensureOpenModel().catch(() => {});
+  }, [ensureOpenModel]);
+
+  // Satu slider sensitivitas untuk mode yang sedang aktif (bawaan atau bebas)
+  const setActiveThreshold = useCallback((value) => {
+    if (customRef.current) {
+      openThresholdRef.current = value;
+      setOpenThresholdState(value);
+    } else {
+      thresholdRef.current = value;
+      setThresholdState(value);
+    }
+  }, []);
 
   const setTilingMode = useCallback((mode) => {
     setTilingModeState(mode);
@@ -223,6 +301,7 @@ export function useObjectDetection() {
     setLineState(lineRef.current);
     commitExtraLines(preset.extraLines.map((l, i) => ({ name: `Garis ${i + 2}`, ...l, id: nextIdRef.current++ })));
     commitZones(preset.zones.map((z) => ({ id: nextIdRef.current++, name: z.name, points: z.points.map((p) => [...p]) })));
+    customRef.current = false;
     targetRef.current = TARGETS[preset.target].classes;
     setTargetState(preset.target);
     thresholdRef.current = preset.threshold;
@@ -273,6 +352,24 @@ export function useObjectDetection() {
   const detectObjects = useCallback(async (videoElement) => {
     if (!model || !videoElement?.videoWidth || !videoElement.videoHeight) return [];
 
+    // Mode bebas: model open-vocabulary mencari objek yang diketik pengguna
+    if (customRef.current) {
+      const prompt = buildPrompt(queryRef.current);
+      if (!prompt) return [];
+      try {
+        const client = await ensureOpenModel();
+        return await client.detect(videoElement, {
+          prompt,
+          label: displayName(queryRef.current),
+          threshold: Math.min(0.1, openThresholdRef.current), // skor rendah tetap dikirim agar pelacak bisa mempertahankan ID
+          modelKey: openModelRef.current,
+        });
+      } catch (err) {
+        console.error('Deteksi bebas gagal:', err);
+        return [];
+      }
+    }
+
     try {
       const full = await detectPass(videoElement, null, model);
       const tiles = tilingActiveRef.current ? planTiles(videoElement.videoWidth, videoElement.videoHeight) : null;
@@ -288,7 +385,7 @@ export function useObjectDetection() {
       console.error('Detection error:', err);
       return [];
     }
-  }, [model]);
+  }, [model, ensureOpenModel]);
 
   const startDetection = useCallback((videoElement) => {
     if (!model || !videoElement) return;
@@ -317,7 +414,7 @@ export function useObjectDetection() {
       const dets = await detectObjects(videoElement);
       if (loopIdRef.current !== loopId) return; // stopped while inferring
       const now = performance.now();
-      const visible = tracker.update(dets, now, thresholdRef.current);
+      const visible = tracker.update(dets, now, customRef.current ? openThresholdRef.current : thresholdRef.current);
       const people = visible.filter((t) => targetRef.current.has(t.className));
       const dims = { width: videoElement.videoWidth, height: videoElement.videoHeight };
       const counter = counterRef.current;
@@ -373,7 +470,10 @@ export function useObjectDetection() {
   }, []);
 
   // Stop the loop on unmount
-  useEffect(() => () => { loopIdRef.current++; }, []);
+  useEffect(() => () => {
+    loopIdRef.current++;
+    openRef.current?.client.dispose();
+  }, []);
 
   return {
     model,
@@ -405,6 +505,13 @@ export function useObjectDetection() {
     resetStats,
     threshold,
     setThreshold,
+    customQuery,
+    setCustomQuery,
+    openModel,
+    setOpenModel,
+    openStatus,
+    activeThreshold: target === 'custom' ? openThreshold : threshold,
+    setActiveThreshold,
     executionProvider: model?.provider ?? 'wasm',
     tier: model?.tier ?? null,
     initializeModel,
