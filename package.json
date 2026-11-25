@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "test": "node --test src/utils/tracker.test.js src/utils/counter.test.js src/utils/insights.test.js",
+    "test": "node --test src/utils/tracker.test.js src/utils/counter.test.js src/utils/insights.test.js src/utils/assignment.test.js src/utils/tiling.test.js src/utils/lines.test.js src/utils/zones.test.js",
     "predev": "node scripts/fetch-models.mjs",
     "prebuild": "node scripts/fetch-models.mjs"
   },
@@ -31,6 +31,6 @@
     "vite": "^7.2.6"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "^18.0.0 || >=20.0.0"
   }
 }

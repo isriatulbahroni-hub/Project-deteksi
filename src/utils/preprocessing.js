@@ -10,9 +10,11 @@ let tensor = null;
 /**
  * Letterbox the source into a modelWidth x modelHeight CHW Float32Array in [0, 1].
  * @param {HTMLVideoElement|HTMLImageElement|HTMLCanvasElement} source
+ * @param {{x:number,y:number,width:number,height:number}|null} [crop] - hanya potongan ini dari
+ *   sumber yang dipakai (mode tajam); koordinat dalam piksel sumber
  * @returns {{tensor: Float32Array, scale: number, offsetX: number, offsetY: number}}
  */
-export function preprocessImage(source, modelWidth, modelHeight) {
+export function preprocessImage(source, modelWidth, modelHeight, crop = null) {
   if (!canvas || canvas.width !== modelWidth || canvas.height !== modelHeight) {
     canvas = document.createElement('canvas');
     canvas.width = modelWidth;
@@ -21,8 +23,8 @@ export function preprocessImage(source, modelWidth, modelHeight) {
     tensor = new Float32Array(3 * modelWidth * modelHeight);
   }
 
-  const sourceWidth = source.videoWidth || source.width;
-  const sourceHeight = source.videoHeight || source.height;
+  const sourceWidth = crop ? crop.width : (source.videoWidth || source.width);
+  const sourceHeight = crop ? crop.height : (source.videoHeight || source.height);
   const scale = Math.min(modelWidth / sourceWidth, modelHeight / sourceHeight);
   const scaledWidth = sourceWidth * scale;
   const scaledHeight = sourceHeight * scale;
@@ -31,7 +33,11 @@ export function preprocessImage(source, modelWidth, modelHeight) {
 
   ctx.fillStyle = '#727272'; // YOLO's letterbox gray (114)
   ctx.fillRect(0, 0, modelWidth, modelHeight);
-  ctx.drawImage(source, offsetX, offsetY, scaledWidth, scaledHeight);
+  if (crop) {
+    ctx.drawImage(source, crop.x, crop.y, crop.width, crop.height, offsetX, offsetY, scaledWidth, scaledHeight);
+  } else {
+    ctx.drawImage(source, offsetX, offsetY, scaledWidth, scaledHeight);
+  }
 
   const pixels = ctx.getImageData(0, 0, modelWidth, modelHeight).data;
   const area = modelWidth * modelHeight;

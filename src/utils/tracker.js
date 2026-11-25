@@ -4,15 +4,27 @@
  * and predicts where boxes are *between* detections so they can be drawn every display frame.
  *
  * Per update: move every track forward by its velocity, match high-confidence detections to
- * tracks by IoU (greedy), then use low-confidence detections only to keep existing tracks alive
+ * tracks by IoU, then use low-confidence detections only to keep existing tracks alive
  * (the ByteTrack trick for blur/occlusion). Matching is class-agnostic so a flickering label
  * doesn't reset the ID; the shown label is the class with the most accumulated confidence.
  *
- * shortcut: greedy IoU matching instead of Hungarian + Kalman; fine for tens of
- * objects, upgrade if IDs swap in very dense scenes.
+ * Pencocokan memakai penugasan optimal (Hungarian) dengan biaya = 1 - IoU ditambah penalti kecil
+ * jarak titik tengah, jadi dua orang yang berdekatan tidak mudah bertukar ID. Posisi diprediksi
+ * dengan kecepatan sederhana (bukan filter Kalman penuh); cukup untuk puluhan objek.
  */
 
 import { calculateIoU } from './postprocessing.js';
+import { assign } from './assignment.js';
+
+const FORBIDDEN = 1e6; // biaya pasangan yang IoU-nya di bawah ambang (tidak boleh dipasangkan)
+
+// Jarak titik tengah dua kotak, dinormalkan dengan diagonal kotak terbesar (0..1).
+function centerDistance(a, b) {
+  const dx = a.x + a.width / 2 - (b.x + b.width / 2);
+  const dy = a.y + a.height / 2 - (b.y + b.height / 2);
+  const diag = Math.hypot(Math.max(a.width, b.width), Math.max(a.height, b.height)) || 1;
+  return Math.min(1, Math.hypot(dx, dy) / diag);
+}
 
 export function createTracker({
   highThreshold = 0.4, // detections at/above this can start new tracks
@@ -26,43 +38,48 @@ export function createTracker({
   let lastTime = null;
   let interval = 0; // ms between the last two updates
 
-  function match(dets, canCreate, dt) {
-    for (const det of dets) {
-      let best = null;
-      let bestIou = matchIou;
-      for (const t of tracks) {
-        if (t.matched) continue;
-        const iou = calculateIoU(t, det);
-        if (iou > bestIou) {
-          bestIou = iou;
-          best = t;
-        }
-      }
+  function apply(track, det, dt) {
+    const nx = alpha * det.x + (1 - alpha) * track.x;
+    const ny = alpha * det.y + (1 - alpha) * track.y;
+    // track.x is already the predicted position, so the residual corrects the velocity (px/ms)
+    if (dt > 0) {
+      track.vx += 0.5 * (nx - track.x) / dt;
+      track.vy += 0.5 * (ny - track.y) / dt;
+    }
+    track.x = nx;
+    track.y = ny;
+    track.width = alpha * det.width + (1 - alpha) * track.width;
+    track.height = alpha * det.height + (1 - alpha) * track.height;
+    track.confidence = det.confidence;
+    track.votes[det.className] = (track.votes[det.className] || 0) + det.confidence;
+    track.hits++;
+    track.matched = true;
+    track.age = 0;
+  }
 
+  function match(dets, canCreate, dt) {
+    const free = tracks.filter((t) => !t.matched);
+    let picks = [];
+    if (free.length && dets.length) {
+      const cost = dets.map((det) => free.map((t) => {
+        const iou = calculateIoU(t, det);
+        if (iou <= matchIou) return FORBIDDEN;
+        return 1 - iou + 0.05 * centerDistance(t, det);
+      }));
+      picks = assign(cost).map((j, i) => (j >= 0 && cost[i][j] < FORBIDDEN ? free[j] : null));
+    }
+
+    dets.forEach((det, i) => {
+      const best = picks[i] ?? null;
       if (best) {
-        const nx = alpha * det.x + (1 - alpha) * best.x;
-        const ny = alpha * det.y + (1 - alpha) * best.y;
-        // best.x is already the predicted position, so the residual corrects the velocity (px/ms)
-        if (dt > 0) {
-          best.vx += 0.5 * (nx - best.x) / dt;
-          best.vy += 0.5 * (ny - best.y) / dt;
-        }
-        best.x = nx;
-        best.y = ny;
-        best.width = alpha * det.width + (1 - alpha) * best.width;
-        best.height = alpha * det.height + (1 - alpha) * best.height;
-        best.confidence = det.confidence;
-        best.votes[det.className] = (best.votes[det.className] || 0) + det.confidence;
-        best.hits++;
-        best.matched = true;
-        best.age = 0;
+        apply(best, det, dt);
       } else if (canCreate) {
         tracks.push({
           ...det, id: nextId++, vx: 0, vy: 0, age: 0, hits: 1, matched: true,
           votes: { [det.className]: det.confidence },
         });
       }
-    }
+    });
   }
 
   let shownThreshold = highThreshold; // threshold from the latest update (the UI slider)
