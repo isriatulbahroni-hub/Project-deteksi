@@ -8,6 +8,7 @@ import { rectPolygon } from './zones.js';
 export const TARGETS = {
   person: { icon: '👥', noun: 'Orang', classes: new Set(['person']) },
   vehicle: { icon: '🚗', noun: 'Kendaraan', classes: new Set(['bicycle', 'motorcycle', 'car', 'bus', 'truck']) },
+  custom: { icon: '🔍', noun: 'Objek bebas', classes: new Set() }, // diisi dari kata yang diketik pengguna
   animal: {
     icon: '🐾',
     noun: 'Hewan',

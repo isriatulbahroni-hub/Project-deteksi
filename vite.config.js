@@ -31,6 +31,8 @@ export default defineConfig({
       },
     },
   },
+  // Worker deteksi bebas (transformers.js) memakai impor dinamis, jadi dibangun sebagai modul ES
+  worker: { format: 'es' },
   optimizeDeps: {
     exclude: ['onnxruntime-web'],
   },
